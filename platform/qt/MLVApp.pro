@@ -42,12 +42,21 @@ DEFINES += QT_DEPRECATED_WARNINGS
 # Feature gates: comment out to disable
 ##############
 CONFIG += jpeg2k_enabled
+win32: CONFIG += crx_enabled
 jpeg2k_enabled{
     DEFINES += \
         ENABLE_JPEG2K \
         OJPH_DISABLE_AVX512 \
         OJPH_DISABLE_AVX2 \
         OJPH_DISABLE_AVX
+}
+
+crx_enabled {
+    DEFINES += ENABLE_CRX
+    CONFIG += link_pkgconfig
+    PKGCONFIG += libraw
+    SOURCES += ../../src/mlv/crx_decoder.cpp
+    HEADERS += ../../src/mlv/crx_decoder.h
 }
 
 ##############
@@ -102,7 +111,7 @@ macx{
 # Else comment these lines!
 win32{
     QMAKE_CFLAGS += -O2 -fopenmp -mssse3 -msse3 -msse2 -msse -D_FILE_OFFSET_BITS=64 -std=c99 -ftree-vectorize
-    LIBS += -llibgomp-1
+    LIBS += -lgomp
     greaterThan(QT_MAJOR_VERSION, 5){
         QMAKE_CXXFLAGS += -fopenmp -mssse3 -std=c++17 -ftree-vectorize
     }

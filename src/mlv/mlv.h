@@ -97,6 +97,21 @@ typedef struct {
 }  mlv_rawi_hdr_t;
 
 typedef struct {
+    uint8_t     blockType[4];
+    uint32_t    blockSize;
+    uint64_t    timestamp;
+    uint8_t     codec[4];
+    uint16_t    version;
+    uint16_t    bits_per_pixel;
+    uint32_t    width;
+    uint32_t    height;
+    uint32_t    stride_pixels;
+    uint32_t    offset_x;
+    uint32_t    offset_y;
+    uint32_t    split_path;
+} mlv_crxf_hdr_t;
+
+typedef struct {
     uint8_t     blockType[4];    /* curve lookup table for decoding data from encoded values to linear (to which black/white level should be applied to) */
     uint32_t    blockSize;    /* total curve block size */
     uint64_t    timestamp;    /* hardware counter timestamp for this frame (relative to recording start) */

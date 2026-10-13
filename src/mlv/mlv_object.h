@@ -30,7 +30,7 @@ typedef struct
 } frame_index_t;
 
 /* MLV App map file header (.MAPP) */
-#define MAPP_VERSION 3
+#define MAPP_VERSION 5
 typedef struct {
     uint8_t     fileMagic[4];  /* MAPP */
     uint64_t    mapp_size;     /* total MAPP file size */
@@ -64,6 +64,7 @@ typedef struct {
     mlv_file_hdr_t    MLVI;
     mlv_rawi_hdr_t    RAWI;
     mlv_rawc_hdr_t    RAWC;
+    mlv_crxf_hdr_t    CRXF;
     mlv_idnt_hdr_t    IDNT;
     mlv_expo_hdr_t    EXPO;
     mlv_lens_hdr_t    LENS;

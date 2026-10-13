@@ -232,7 +232,7 @@ void readMlvAudioData(mlvObject_t * video)
         return;
     }
 
-    if (isMcrawLoaded(video))
+    if (isMcrawLoaded(video) && !isMlvCrx(video))
     {
         mr_item_t hdr_item = {};
 

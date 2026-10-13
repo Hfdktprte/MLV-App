@@ -22,6 +22,9 @@
 #include "mlv.h"
 #include "llrawproc/llrawproc.h"
 #include "mcraw/mcraw.h"
+#ifdef ENABLE_CRX
+#include "crx_decoder.h"
+#endif
 
 /* Debayering module */
 #include "../debayer/debayer.h"
@@ -213,7 +216,7 @@ int getMlvRawFrameUint16(mlvObject_t * video, uint64_t frameIndex, uint16_t * un
     /* How many bytes is RAW frame */
     int raw_frame_size = (width * height * bitdepth) / 8;
     /* Memory buffer for original RAW data */
-    uint8_t * raw_frame = (uint8_t *)malloc(raw_frame_size + 4); // additional 4 bytes for safety
+    uint8_t * raw_frame = (uint8_t *)malloc(MAX(raw_frame_size, frame_size) + 4); // additional 4 bytes for safety
 
     FILE * file = video->file[chunk];
 
@@ -222,7 +225,7 @@ int getMlvRawFrameUint16(mlvObject_t * video, uint64_t frameIndex, uint16_t * un
 
     file_set_pos(file, frame_header_offset, SEEK_SET);
 
-    if (isMcrawLoaded(video))
+    if (isMcrawLoaded(video) && !isMlvCrx(video))
     {
         mr_item_t item = {};
 
@@ -316,6 +319,42 @@ int getMlvRawFrameUint16(mlvObject_t * video, uint64_t frameIndex, uint16_t * un
 
         file_set_pos(file, frame_offset, SEEK_SET);
 
+#ifdef ENABLE_CRX
+        int crx_frame = isMlvCrx(video);
+        if (!crx_frame && frame_size >= 4)
+        {
+            uint8_t signature[4];
+            if (fread(signature, sizeof(signature), 1, file) == 1 &&
+                memcmp(signature, "\xff\x00\x00\x30", sizeof(signature)) == 0)
+            {
+                crx_frame = 1;
+                memcpy(video->CRXF.codec, "CRX1", 4);
+            }
+            file_set_pos(file, frame_offset, SEEK_SET);
+        }
+
+        if (crx_frame)
+        {
+            if(fread(raw_frame, frame_size, 1, file) != 1)
+            {
+                DEBUG( printf("Frame data read error crx\n"); )
+                free(raw_frame);
+                pthread_mutex_unlock(video->main_file_mutex + chunk);
+                return 1;
+            }
+
+            pthread_mutex_unlock(video->main_file_mutex + chunk);
+
+            int ret = crx_decode_frame(raw_frame, frame_size, unpackedFrame, width, height);
+            if(ret != 0)
+            {
+                DEBUG( printf("CRX decoder: Failed with error code (%d)\n", ret); )
+                free(raw_frame);
+                return 1;
+            }
+        }
+        else
+#endif
         if (video->MLVI.videoClass & MLV_VIDEO_CLASS_FLAG_LJ92)
         {
             if(fread(raw_frame, frame_size, 1, file) != 1)
@@ -871,6 +910,7 @@ static int save_mapp(mlvObject_t * video)
                            sizeof(mlv_file_hdr_t) +
                            sizeof(mlv_rawi_hdr_t) +
                            sizeof(mlv_rawc_hdr_t) +
+                           sizeof(mlv_crxf_hdr_t) +
                            sizeof(mlv_idnt_hdr_t) +
                            sizeof(mlv_expo_hdr_t) +
                            sizeof(mlv_lens_hdr_t) +
@@ -901,7 +941,8 @@ static int save_mapp(mlvObject_t * video)
     memcpy(ptr += sizeof(mapp_header_t), (uint8_t*)&(video->MLVI), sizeof(mlv_file_hdr_t));
     memcpy(ptr += sizeof(mlv_file_hdr_t), (uint8_t*)&(video->RAWI), sizeof(mlv_rawi_hdr_t));
     memcpy(ptr += sizeof(mlv_rawi_hdr_t), (uint8_t*)&(video->RAWC), sizeof(mlv_rawc_hdr_t));
-    memcpy(ptr += sizeof(mlv_rawc_hdr_t), (uint8_t*)&(video->IDNT), sizeof(mlv_idnt_hdr_t));
+    memcpy(ptr += sizeof(mlv_rawc_hdr_t), (uint8_t*)&(video->CRXF), sizeof(mlv_crxf_hdr_t));
+    memcpy(ptr += sizeof(mlv_crxf_hdr_t), (uint8_t*)&(video->IDNT), sizeof(mlv_idnt_hdr_t));
     memcpy(ptr += sizeof(mlv_idnt_hdr_t), (uint8_t*)&(video->EXPO), sizeof(mlv_expo_hdr_t));
     memcpy(ptr += sizeof(mlv_expo_hdr_t), (uint8_t*)&(video->LENS), sizeof(mlv_lens_hdr_t));
     memcpy(ptr += sizeof(mlv_lens_hdr_t), (uint8_t*)&(video->ELNS), sizeof(mlv_elns_hdr_t));
@@ -1024,6 +1065,7 @@ static int load_mapp(mlvObject_t * video)
     ret += fread(&(video->MLVI), sizeof(mlv_file_hdr_t), 1, mappf);
     ret += fread(&(video->RAWI), sizeof(mlv_rawi_hdr_t), 1, mappf);
     ret += fread(&(video->RAWC), sizeof(mlv_rawc_hdr_t), 1, mappf);
+    ret += fread(&(video->CRXF), sizeof(mlv_crxf_hdr_t), 1, mappf);
     ret += fread(&(video->IDNT), sizeof(mlv_idnt_hdr_t), 1, mappf);
     ret += fread(&(video->EXPO), sizeof(mlv_expo_hdr_t), 1, mappf);
     ret += fread(&(video->LENS), sizeof(mlv_lens_hdr_t), 1, mappf);
@@ -1035,7 +1077,7 @@ static int load_mapp(mlvObject_t * video)
     ret += fread(&(video->DISO), sizeof(mlv_diso_hdr_t), 1, mappf);
     ret += fread(&(video->DARK), sizeof(mlv_dark_hdr_t), 1, mappf);
     ret += fread(&(video->camid), sizeof(camera_id_t), 1, mappf);
-    if(ret != 14)
+    if(ret != 15)
     {
         DEBUG( printf("ret = %d, could not read metadata from %s\n", ret, mapp_filename); )
         goto mapp_error;
@@ -2325,6 +2367,19 @@ int openMlvClip(mlvObject_t * video, char * mlvPath, int open_mode, char * error
                 video->video_index[video_frames].frame_time = video->VIDF.timestamp;
                 video->video_index[video_frames].block_offset = block_start;
 
+#ifdef ENABLE_CRX
+                if (!isMlvCrx(video) && video->video_index[video_frames].frame_size >= 4)
+                {
+                    uint8_t signature[4];
+                    file_set_pos(video->file[i], video->video_index[video_frames].frame_offset, SEEK_SET);
+                    if (fread(signature, sizeof(signature), 1, video->file[i]) == 1 &&
+                        memcmp(signature, "\xff\x00\x00\x30", sizeof(signature)) == 0)
+                    {
+                        memcpy(video->CRXF.codec, "CRX1", 4);
+                    }
+                }
+#endif
+
                 /* Count actual video frames */
                 video_frames++;
 
@@ -2379,6 +2434,10 @@ int openMlvClip(mlvObject_t * video, char * mlvPath, int open_mode, char * error
             else if ( memcmp(block_header.blockType, "RAWC", 4) == 0 )
             {
                 fread_err &= fread(&video->RAWC, sizeof(mlv_rawc_hdr_t), 1, video->file[i]);
+            }
+            else if ( memcmp(block_header.blockType, "CRXF", 4) == 0 )
+            {
+                fread_err &= fread(&video->CRXF, sizeof(mlv_crxf_hdr_t), 1, video->file[i]);
             }
             else if ( memcmp(block_header.blockType, "WAVI", 4) == 0 )
             {

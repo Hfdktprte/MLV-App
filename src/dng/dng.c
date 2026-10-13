@@ -36,6 +36,7 @@
 #include "../mlv/llrawproc/llrawproc.h"
 #include "../mlv/mcraw/mcraw.h"
 #include "../mlv/macros.h"
+#include "../mlv/video_mlv.h"
 
 #define IFD0_COUNT 41
 #define EXIF_IFD_COUNT 11
@@ -913,8 +914,15 @@ static int dng_get_frame(mlvObject_t * mlv_data, dngObject_t * dng_data, uint32_
 
     FILE *fd = mlv_data->file[mlv_data->video_index[frame_index].chunk_num];
 
-    if (isMcrawLoaded(mlv_data))
+    if (isMcrawLoaded(mlv_data) || isMlvCrx(mlv_data))
     {
+        if (isMlvCrx(mlv_data))
+        {
+            if (getMlvRawFrameUint16(mlv_data, frame_index, dng_data->image_buf_unpacked))
+                return -1;
+        }
+        else
+        {
         /* Move to start of frame in file and read the RAW data */
         file_set_pos(fd, mlv_data->video_index[frame_index].block_offset, SEEK_SET);
 
@@ -955,6 +963,7 @@ static int dng_get_frame(mlvObject_t * mlv_data, dngObject_t * dng_data, uint32_
             printf("mcraw decoder: Failed with error code (%ld)\n", ret);
 #endif
             return -1;
+        }
         }
 
         /* apply low level raw processing to the unpacked_frame */
